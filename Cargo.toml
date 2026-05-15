@@ -1,0 +1,38 @@
+[package]
+name = "wealthfolio-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Rust CLI for Wealthfolio's REST API (login, accounts, activities, net-worth)"
+license = "MIT"
+repository = "https://github.com/klh-homes/wealthfolio-cli"
+rust-version = "1.83"
+
+[[bin]]
+name = "wf"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "cookies",
+    "multipart",
+    # Bundle Mozilla webpki roots in the binary so the distroless release
+    # image doesn't need a system CA bundle.
+    "rustls-tls-webpki-roots",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+directories = "5"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
