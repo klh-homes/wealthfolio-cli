@@ -1,6 +1,6 @@
 # wealthfolio-cli
 
-Rust CLI for [Wealthfolio's](https://wealthfolio.app) self-hosted REST API. Designed for AI agents and shell scripts that need to push parsed bank/broker statements into a Wealthfolio instance — `wf` handles auth (cookie cache + auto-refresh), account ops, CSV import, and net-worth queries.
+Rust CLI for [Wealthfolio's](https://wealthfolio.app) self-hosted REST API. Designed for AI agents and shell scripts that need to push parsed bank/broker statements into a Wealthfolio instance — `wf` handles auth (cookie cache + auto-refresh), account ops, CSV / JSON activity import, search, and net-worth queries.
 
 ## Why this exists
 
@@ -14,12 +14,12 @@ Wealthfolio is single-user with cookie-based JWT auth and **no Personal Access T
 docker pull ghcr.io/klh-homes/wealthfolio-cli:latest
 ```
 
-Tagged image (e.g. `ghcr.io/klh-homes/wealthfolio-cli:v0.1.0`). The image bundles the `wf` binary at `/usr/local/bin/wf` and the `SKILL.md` under `/skills/wealthfolio-cli/SKILL.md` for downstream Dockerfiles to pick up with `COPY --from=...`.
+Tagged image (e.g. `ghcr.io/klh-homes/wealthfolio-cli:v0.2.0`). The image bundles the `wf` binary at `/usr/local/bin/wf` and the `SKILL.md` under `/skills/wealthfolio-cli/SKILL.md` for downstream Dockerfiles to pick up with `COPY --from=...`.
 
 ### From cargo
 
 ```bash
-cargo install --git https://github.com/klh-homes/wealthfolio-cli --tag v0.1.0
+cargo install --git https://github.com/klh-homes/wealthfolio-cli --tag v0.2.0
 ```
 
 ### From source
@@ -44,15 +44,22 @@ Session cookies live at `~/.cache/wf/cookies.json` (XDG-compliant, mode 0600).
 ## Commands
 
 ```text
-wf doctor                                        # env + DNS + login health
-wf login | logout                                # cached session mgmt (auto)
+wf doctor                                              # env + DNS + login health
+wf login | logout                                      # cached session mgmt (auto)
+
 wf accounts list [--json]
 wf accounts get <id>
-wf accounts create --name X --currency TWD --type SAVINGS --tracking HOLDINGS
+wf accounts create --name X --currency TWD --type SAVINGS --tracking TRANSACTIONS
+wf accounts update <id> [--tracking TRANSACTIONS --name … …]
 wf accounts delete <id>
-wf activities import-parse  --account <id> file.csv   # dry-run (no write)
-wf activities import-check  --account <id> file.csv   # full validation
-wf activities import        --account <id> file.csv   # actual write
+
+wf activities import-parse  --account <id> file.csv    # server-side CSV parse (no write)
+wf activities import-check  --account <id> file.csv    # parse + map + validate (no write)
+wf activities import        --account <id> file.csv    # parse + map + commit (silent dedup)
+wf activities bulk-create   file.json                  # POST /bulk with NewActivity[] (typed, srid-aware)
+wf activities search [--account <id>] [--page N --page-size N --date-from … --date-to …]
+wf activities delete <activity-id>
+
 wf net-worth current [--json]
 ```
 

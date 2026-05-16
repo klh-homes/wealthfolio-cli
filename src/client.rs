@@ -69,6 +69,27 @@ impl<'a> WfClient<'a> {
         resp.json::<T>().context("parse JSON response")
     }
 
+    /// PUT JSON body, expect JSON response.
+    pub fn put_json<B: serde::Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
+        let url = self.url(path);
+        debug!(%url, "PUT");
+        let resp = self.inner.put(&url).json(body).send()?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().unwrap_or_default();
+            return Err(WfError::Http {
+                status: status.as_u16(),
+                body: text,
+            }
+            .into());
+        }
+        resp.json::<T>().context("parse JSON response")
+    }
+
     /// DELETE <path>. Returns nothing on 2xx.
     pub fn delete(&self, path: &str) -> Result<()> {
         let url = self.url(path);
