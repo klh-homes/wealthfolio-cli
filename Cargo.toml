@@ -1,6 +1,6 @@
 [package]
 name = "wealthfolio-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Rust CLI for Wealthfolio's REST API (login, accounts, activities, net-worth)"
 license = "MIT"

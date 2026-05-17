@@ -19,7 +19,7 @@ pub enum Cmd {
     #[command(subcommand)]
     Accounts(accounts::AccountCmd),
 
-    /// Activity operations (currently only CSV import).
+    /// Activity operations: CSV import, JSON bulk-create, search, delete.
     #[command(subcommand)]
     Activities(activities::ActivityCmd),
 
