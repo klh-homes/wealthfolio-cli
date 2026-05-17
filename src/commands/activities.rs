@@ -148,7 +148,9 @@ pub fn map_csv_to_activities(
     for (i, h) in headers.iter().enumerate() {
         idx.assign(h, i);
     }
-    let date_col = idx.date.ok_or_else(|| anyhow!("CSV missing 'date' column"))?;
+    let date_col = idx
+        .date
+        .ok_or_else(|| anyhow!("CSV missing 'date' column"))?;
     let type_col = idx
         .activity_type
         .ok_or_else(|| anyhow!("CSV missing 'activityType' column"))?;
@@ -169,10 +171,7 @@ pub fn map_csv_to_activities(
         let activity_type = cell(row, type_col)
             .ok_or_else(|| anyhow!("row {} (1-indexed): empty 'activityType'", n + 1))?;
         let symbol = idx.symbol.and_then(|c| cell(row, c)).unwrap_or_default();
-        let currency = idx
-            .currency
-            .and_then(|c| cell(row, c))
-            .unwrap_or_default();
+        let currency = idx.currency.and_then(|c| cell(row, c)).unwrap_or_default();
 
         out.push(ActivityImport {
             id: idx.id.and_then(|c| cell(row, c)),
@@ -206,20 +205,23 @@ fn parse_bulk_body(raw: &str) -> Result<ActivityBulkMutationRequest> {
     let value: Value = serde_json::from_str(raw).context("invalid JSON")?;
     let body = match value {
         Value::Array(_) => {
-            let creates: Vec<NewActivity> = serde_json::from_value(value)
-                .context("decode JSON array as [NewActivity]")?;
+            let creates: Vec<NewActivity> =
+                serde_json::from_value(value).context("decode JSON array as [NewActivity]")?;
             ActivityBulkMutationRequest {
                 creates,
                 updates: vec![],
                 delete_ids: vec![],
             }
         }
-        Value::Object(_) => serde_json::from_value(value)
-            .context("decode object as ActivityBulkMutationRequest")?,
+        Value::Object(_) => {
+            serde_json::from_value(value).context("decode object as ActivityBulkMutationRequest")?
+        }
         _ => return Err(anyhow!("expected JSON array or object, got scalar")),
     };
     if body.creates.is_empty() && body.updates.is_empty() && body.delete_ids.is_empty() {
-        return Err(anyhow!("nothing to do: creates/updates/deleteIds all empty"));
+        return Err(anyhow!(
+            "nothing to do: creates/updates/deleteIds all empty"
+        ));
     }
     Ok(body)
 }
@@ -288,7 +290,10 @@ fn import_check(cfg: &Config, account: &str, file: &Path, emit_json: bool) -> Re
     let client = WfClient::new(cfg)?;
     let parsed = parse_csv_via_server(&client, account, file)?;
     let activities = map_csv_to_activities(&parsed.headers, &parsed.rows, account)?;
-    info!(rows = activities.len(), "POST /api/v1/activities/import/check");
+    info!(
+        rows = activities.len(),
+        "POST /api/v1/activities/import/check"
+    );
     let body = ImportCheckBody {
         activities: &activities,
     };
@@ -316,9 +321,7 @@ fn import_commit(cfg: &Config, account: &str, file: &Path, emit_json: bool) -> R
 
 fn print_import_summary(resp: &ImportResponse, sent: usize) {
     let summary = resp.get("summary");
-    let total = summary
-        .and_then(|s| s.get("total"))
-        .and_then(Value::as_u64);
+    let total = summary.and_then(|s| s.get("total")).and_then(Value::as_u64);
     let imported = summary
         .and_then(|s| s.get("imported"))
         .and_then(Value::as_u64);
@@ -329,18 +332,16 @@ fn print_import_summary(resp: &ImportResponse, sent: usize) {
         .and_then(|s| s.get("duplicates"))
         .and_then(Value::as_u64);
     match (total, imported, skipped, duplicates) {
-        (Some(t), Some(i), Some(s), Some(d)) => println!(
-            "import: total={t} imported={i} skipped={s} duplicates={d}"
-        ),
+        (Some(t), Some(i), Some(s), Some(d)) => {
+            println!("import: total={t} imported={i} skipped={s} duplicates={d}")
+        }
         _ => println!("import: ok ({sent} rows sent)"),
     }
 }
 
 fn bulk_create(cfg: &Config, file: &Path, emit_json: bool) -> Result<()> {
-    let raw = std::fs::read_to_string(file)
-        .with_context(|| format!("read {}", file.display()))?;
-    let body = parse_bulk_body(&raw)
-        .with_context(|| format!("parse {}", file.display()))?;
+    let raw = std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    let body = parse_bulk_body(&raw).with_context(|| format!("parse {}", file.display()))?;
     let client = WfClient::new(cfg)?;
     info!(
         creates = body.creates.len(),
@@ -454,9 +455,18 @@ fn print_check(rows: &[ActivityImport], emit_json: bool) -> Result<()> {
 }
 
 fn print_bulk_summary(result: &ActivityBulkMutationResult) {
-    let created = result.get("created").and_then(Value::as_array).map(Vec::len);
-    let updated = result.get("updated").and_then(Value::as_array).map(Vec::len);
-    let deleted = result.get("deleted").and_then(Value::as_array).map(Vec::len);
+    let created = result
+        .get("created")
+        .and_then(Value::as_array)
+        .map(Vec::len);
+    let updated = result
+        .get("updated")
+        .and_then(Value::as_array)
+        .map(Vec::len);
+    let deleted = result
+        .get("deleted")
+        .and_then(Value::as_array)
+        .map(Vec::len);
     let errors = result.get("errors").and_then(Value::as_array).map(Vec::len);
     println!(
         "bulk: created={} updated={} deleted={} errors={}",
@@ -500,7 +510,11 @@ fn print_search(resp: &ActivitySearchResponse) {
             .to_string();
         let amount = r
             .get("amount")
-            .and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_f64().map(|n| format!("{n}"))))
+            .and_then(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .or_else(|| v.as_f64().map(|n| format!("{n}")))
+            })
             .unwrap_or_default();
         let ccy = r
             .get("currency")

@@ -42,11 +42,13 @@ pub enum AccountCmd {
         json: bool,
     },
     /// Update an account (set/replace fields; cannot clear optional fields — use the web UI for that).
-    #[command(long_about = "Update an account. Fetches the current record, applies the given \
+    #[command(
+        long_about = "Update an account. Fetches the current record, applies the given \
         changes, and PUTs the result. Only the flags you pass are changed.\n\n\
         Limitation: there is no way to clear an optional field (group, platform-id, \
         account-number) via this command — values can be set or replaced but not removed. \
-        Use the Wealthfolio web UI to clear an optional field.")]
+        Use the Wealthfolio web UI to clear an optional field."
+    )]
     Update {
         id: String,
         #[arg(long)]
