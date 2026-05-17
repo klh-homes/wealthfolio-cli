@@ -121,7 +121,6 @@ pub struct ActivityImport {
     pub errors: Option<Value>,
     #[serde(default, skip_serializing)]
     pub warnings: Option<Value>,
-    #[allow(dead_code)]
     #[serde(default, skip_serializing)]
     pub duplicate_of_id: Option<String>,
 }
@@ -262,6 +261,18 @@ mod tests {
 
         let w: W = serde_json::from_value(json!({"v": 42})).unwrap();
         assert_eq!(w.v.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn de_str_or_num_accepts_bool_as_stringified() {
+        #[derive(Deserialize)]
+        struct W {
+            #[serde(default, deserialize_with = "de_str_or_num")]
+            v: Option<String>,
+        }
+        // Bool falls through the catch-all branch; we accept and stringify.
+        let w: W = serde_json::from_value(json!({"v": true})).unwrap();
+        assert_eq!(w.v.as_deref(), Some("true"));
     }
 
     #[test]

@@ -202,7 +202,7 @@ pub fn map_csv_to_activities(
 /// of `NewActivity` (which is wrapped into a `creates` slot) or a full
 /// `ActivityBulkMutationRequest` object. Errors on scalar input or on
 /// an empty effective payload.
-pub fn parse_bulk_body(raw: &str) -> Result<ActivityBulkMutationRequest> {
+fn parse_bulk_body(raw: &str) -> Result<ActivityBulkMutationRequest> {
     let value: Value = serde_json::from_str(raw).context("invalid JSON")?;
     let body = match value {
         Value::Array(_) => {
@@ -309,10 +309,31 @@ fn import_commit(cfg: &Config, account: &str, file: &Path, emit_json: bool) -> R
     if emit_json {
         println!("{}", serde_json::to_string_pretty(&resp)?);
     } else {
-        println!("import: ok");
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+        print_import_summary(&resp, activities.len());
     }
     Ok(())
+}
+
+fn print_import_summary(resp: &ImportResponse, sent: usize) {
+    let summary = resp.get("summary");
+    let total = summary
+        .and_then(|s| s.get("total"))
+        .and_then(Value::as_u64);
+    let imported = summary
+        .and_then(|s| s.get("imported"))
+        .and_then(Value::as_u64);
+    let skipped = summary
+        .and_then(|s| s.get("skipped"))
+        .and_then(Value::as_u64);
+    let duplicates = summary
+        .and_then(|s| s.get("duplicates"))
+        .and_then(Value::as_u64);
+    match (total, imported, skipped, duplicates) {
+        (Some(t), Some(i), Some(s), Some(d)) => println!(
+            "import: total={t} imported={i} skipped={s} duplicates={d}"
+        ),
+        _ => println!("import: ok ({sent} rows sent)"),
+    }
 }
 
 fn bulk_create(cfg: &Config, file: &Path, emit_json: bool) -> Result<()> {
@@ -402,9 +423,11 @@ fn print_check(rows: &[ActivityImport], emit_json: bool) -> Result<()> {
     let valid = rows.iter().filter(|r| r.is_valid).count();
     let with_errors = rows.iter().filter(|r| r.errors.is_some()).count();
     let with_warnings = rows.iter().filter(|r| r.warnings.is_some()).count();
+    let with_duplicates = rows.iter().filter(|r| r.duplicate_of_id.is_some()).count();
     println!("check: {valid}/{} valid", rows.len());
-    println!("  errors   : {with_errors}");
-    println!("  warnings : {with_warnings}");
+    println!("  errors     : {with_errors}");
+    println!("  warnings   : {with_warnings}");
+    println!("  duplicates : {with_duplicates}");
     for (i, row) in rows.iter().enumerate() {
         if let Some(errs) = &row.errors {
             println!(
@@ -414,6 +437,16 @@ fn print_check(rows: &[ActivityImport], emit_json: bool) -> Result<()> {
                 row.activity_type,
                 row.amount.clone().unwrap_or_default(),
                 errs
+            );
+        }
+        if let Some(dup_of) = &row.duplicate_of_id {
+            println!(
+                "  row {} ({} {} {}): duplicate of {}",
+                i + 1,
+                row.date,
+                row.activity_type,
+                row.amount.clone().unwrap_or_default(),
+                dup_of
             );
         }
     }
@@ -458,7 +491,7 @@ fn print_search(resp: &ActivitySearchResponse) {
         let date = r
             .get("date")
             .and_then(Value::as_str)
-            .map(|s| s.get(..10).unwrap_or(s).to_string())
+            .map(|s| s.split('T').next().unwrap_or(s).to_string())
             .unwrap_or_default();
         let atype = r
             .get("activityType")
