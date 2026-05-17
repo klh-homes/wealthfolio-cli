@@ -233,3 +233,176 @@ pub struct ActivitySearchRequest {
 /// Loose response — `meta.totalRowCount` plus a `data: [Activity]`
 /// array.
 pub type ActivitySearchResponse = Value;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn de_str_or_num_accepts_string() {
+        #[derive(Deserialize)]
+        struct W {
+            #[serde(default, deserialize_with = "de_str_or_num")]
+            v: Option<String>,
+        }
+        let w: W = serde_json::from_value(json!({"v": "2000.5"})).unwrap();
+        assert_eq!(w.v.as_deref(), Some("2000.5"));
+    }
+
+    #[test]
+    fn de_str_or_num_accepts_number() {
+        #[derive(Deserialize)]
+        struct W {
+            #[serde(default, deserialize_with = "de_str_or_num")]
+            v: Option<String>,
+        }
+        let w: W = serde_json::from_value(json!({"v": 2000.5})).unwrap();
+        assert_eq!(w.v.as_deref(), Some("2000.5"));
+
+        let w: W = serde_json::from_value(json!({"v": 42})).unwrap();
+        assert_eq!(w.v.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn de_str_or_num_accepts_null_and_missing() {
+        #[derive(Deserialize)]
+        struct W {
+            #[serde(default, deserialize_with = "de_str_or_num")]
+            v: Option<String>,
+        }
+        let w: W = serde_json::from_value(json!({"v": null})).unwrap();
+        assert!(w.v.is_none());
+        let w: W = serde_json::from_value(json!({})).unwrap();
+        assert!(w.v.is_none());
+    }
+
+    #[test]
+    fn activity_import_drops_none_fields_on_serialize() {
+        let a = ActivityImport {
+            date: "2026-04-01".into(),
+            symbol: String::new(),
+            activity_type: "WITHDRAWAL".into(),
+            currency: "TWD".into(),
+            amount: Some("2000".into()),
+            comment: Some("transfer".into()),
+            account_id: Some("acct-1".into()),
+            is_valid: true,
+            ..Default::default()
+        };
+        let v: Value = serde_json::to_value(&a).unwrap();
+        let obj = v.as_object().unwrap();
+        // Required fields present
+        assert!(obj.contains_key("date"));
+        assert!(obj.contains_key("activityType"));
+        assert!(obj.contains_key("currency"));
+        // Required-empty-but-always-serialized: symbol stays as ""
+        assert_eq!(obj.get("symbol"), Some(&json!("")));
+        // None fields skipped
+        assert!(!obj.contains_key("quantity"));
+        assert!(!obj.contains_key("unitPrice"));
+        assert!(!obj.contains_key("fee"));
+        assert!(!obj.contains_key("subtype"));
+        assert!(!obj.contains_key("fxRate"));
+        assert!(!obj.contains_key("id"));
+        // Some fields populated
+        assert_eq!(obj.get("amount"), Some(&json!("2000")));
+        assert_eq!(obj.get("comment"), Some(&json!("transfer")));
+        // Server-populated fields never serialized
+        assert!(!obj.contains_key("errors"));
+        assert!(!obj.contains_key("warnings"));
+        assert!(!obj.contains_key("duplicateOfId"));
+    }
+
+    #[test]
+    fn activity_import_deserializes_server_response_shape() {
+        // Mirrors what /import/check actually returns: amounts as numbers,
+        // server-populated id/errors/warnings/duplicateOfId.
+        let body = json!({
+            "id": "7a49d623",
+            "date": "2026-04-01",
+            "symbol": "",
+            "activityType": "WITHDRAWAL",
+            "currency": "TWD",
+            "amount": 2000.0,
+            "fee": null,
+            "comment": "transfer",
+            "accountId": "acct-1",
+            "isDraft": false,
+            "isValid": true,
+            "errors": null,
+            "warnings": {"_duplicate": ["Duplicate"]},
+            "duplicateOfId": "abc-123"
+        });
+        let a: ActivityImport = serde_json::from_value(body).unwrap();
+        // serde_json preserves float repr; "2000.0" not "2000"
+        assert_eq!(a.amount.as_deref(), Some("2000.0"));
+        assert_eq!(a.duplicate_of_id.as_deref(), Some("abc-123"));
+        assert!(a.warnings.is_some());
+    }
+
+    #[test]
+    fn new_activity_cash_serialization() {
+        let n = NewActivity {
+            account_id: "acct-1".into(),
+            activity_type: "WITHDRAWAL".into(),
+            activity_date: "2026-04-01".into(),
+            amount: Some("2000".into()),
+            currency: "TWD".into(),
+            notes: Some("[main] transfer".into()),
+            source_system: Some("LINE_BANK".into()),
+            source_record_id: Some("linebank-1651-2026-04-01-126357".into()),
+            status: Some("POSTED".into()),
+            ..Default::default()
+        };
+        let v: Value = serde_json::to_value(&n).unwrap();
+        let obj = v.as_object().unwrap();
+        // No asset field on cash (asset: None is skipped)
+        assert!(!obj.contains_key("asset"));
+        assert!(!obj.contains_key("quantity"));
+        assert!(!obj.contains_key("unitPrice"));
+        assert!(!obj.contains_key("subtype"));
+        // Tagging fields preserved
+        assert_eq!(obj.get("sourceSystem"), Some(&json!("LINE_BANK")));
+        assert_eq!(
+            obj.get("sourceRecordId"),
+            Some(&json!("linebank-1651-2026-04-01-126357"))
+        );
+        // Notes (NOT comment) is the canonical NewActivity field name
+        assert_eq!(obj.get("notes"), Some(&json!("[main] transfer")));
+        assert!(!obj.contains_key("comment"));
+    }
+
+    #[test]
+    fn new_activity_accepts_comment_alias_on_deserialize() {
+        // Server / client tools sometimes call it "comment"; we accept
+        // both on the way in.
+        let v = json!({
+            "accountId": "acct-1",
+            "activityType": "DEPOSIT",
+            "activityDate": "2026-04-01",
+            "currency": "TWD",
+            "comment": "via alias"
+        });
+        let n: NewActivity = serde_json::from_value(v).unwrap();
+        assert_eq!(n.notes.as_deref(), Some("via alias"));
+    }
+
+    #[test]
+    fn search_request_omits_none_filters() {
+        let r = ActivitySearchRequest {
+            page: 0,
+            page_size: 50,
+            account_id_filter: Some("acct-1".into()),
+            ..Default::default()
+        };
+        let v: Value = serde_json::to_value(&r).unwrap();
+        let obj = v.as_object().unwrap();
+        assert_eq!(obj.get("page"), Some(&json!(0)));
+        assert_eq!(obj.get("pageSize"), Some(&json!(50)));
+        assert_eq!(obj.get("accountIdFilter"), Some(&json!("acct-1")));
+        assert!(!obj.contains_key("dateFrom"));
+        assert!(!obj.contains_key("dateTo"));
+        assert!(!obj.contains_key("activityTypeFilter"));
+    }
+}

@@ -88,3 +88,74 @@ impl From<&Account> for AccountUpdate {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_account() -> Account {
+        Account {
+            id: "uuid-1".into(),
+            name: "LINE Bank".into(),
+            account_type: "SAVINGS".into(),
+            currency: "TWD".into(),
+            is_default: false,
+            is_active: true,
+            is_archived: false,
+            tracking_mode: "HOLDINGS".into(),
+            group: Some("Personal".into()),
+            platform_id: None,
+            account_number: Some("****1651".into()),
+            meta: None,
+            provider: None,
+            provider_account_id: None,
+            created_at: Some("2026-05-15T00:00:00".into()),
+            updated_at: Some("2026-05-15T00:00:00".into()),
+        }
+    }
+
+    #[test]
+    fn account_update_from_account_preserves_required_fields() {
+        let a = sample_account();
+        let u = AccountUpdate::from(&a);
+        assert_eq!(u.id, "uuid-1");
+        assert_eq!(u.name, "LINE Bank");
+        assert_eq!(u.account_type, "SAVINGS");
+        assert_eq!(u.currency, "TWD");
+        assert_eq!(u.tracking_mode, "HOLDINGS");
+        assert_eq!(u.group.as_deref(), Some("Personal"));
+        assert_eq!(u.account_number.as_deref(), Some("****1651"));
+        assert!(!u.is_default);
+        assert!(u.is_active);
+    }
+
+    #[test]
+    fn account_update_serializes_camel_case_and_skips_none() {
+        let mut u = AccountUpdate::from(&sample_account());
+        u.tracking_mode = "TRANSACTIONS".into();
+        u.platform_id = None;
+        let v: serde_json::Value = serde_json::to_value(&u).unwrap();
+        let obj = v.as_object().unwrap();
+        assert_eq!(obj.get("trackingMode").unwrap(), "TRANSACTIONS");
+        assert_eq!(obj.get("accountType").unwrap(), "SAVINGS");
+        // None fields are dropped
+        assert!(!obj.contains_key("platformId"));
+        // group is Some, present
+        assert_eq!(obj.get("group").unwrap(), "Personal");
+    }
+
+    #[test]
+    fn account_update_round_trip_does_not_drop_fields() {
+        // Update with no changes should produce a body identical to
+        // round-trip of the original account's mutable fields.
+        let a = sample_account();
+        let u = AccountUpdate::from(&a);
+        let v = serde_json::to_value(&u).unwrap();
+        let obj = v.as_object().unwrap();
+        assert_eq!(obj.get("id").unwrap(), "uuid-1");
+        assert_eq!(obj.get("name").unwrap(), "LINE Bank");
+        assert_eq!(obj.get("currency").unwrap(), "TWD");
+        assert_eq!(obj.get("isActive").unwrap(), true);
+        assert_eq!(obj.get("isDefault").unwrap(), false);
+    }
+}

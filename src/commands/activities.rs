@@ -198,6 +198,32 @@ pub fn map_csv_to_activities(
     Ok(out)
 }
 
+/// Parse a `bulk-create` input. Accepts either a top-level JSON array
+/// of `NewActivity` (which is wrapped into a `creates` slot) or a full
+/// `ActivityBulkMutationRequest` object. Errors on scalar input or on
+/// an empty effective payload.
+pub fn parse_bulk_body(raw: &str) -> Result<ActivityBulkMutationRequest> {
+    let value: Value = serde_json::from_str(raw).context("invalid JSON")?;
+    let body = match value {
+        Value::Array(_) => {
+            let creates: Vec<NewActivity> = serde_json::from_value(value)
+                .context("decode JSON array as [NewActivity]")?;
+            ActivityBulkMutationRequest {
+                creates,
+                updates: vec![],
+                delete_ids: vec![],
+            }
+        }
+        Value::Object(_) => serde_json::from_value(value)
+            .context("decode object as ActivityBulkMutationRequest")?,
+        _ => return Err(anyhow!("expected JSON array or object, got scalar")),
+    };
+    if body.creates.is_empty() && body.updates.is_empty() && body.delete_ids.is_empty() {
+        return Err(anyhow!("nothing to do: creates/updates/deleteIds all empty"));
+    }
+    Ok(body)
+}
+
 #[derive(Default)]
 struct ColumnIndex {
     id: Option<usize>,
@@ -292,27 +318,8 @@ fn import_commit(cfg: &Config, account: &str, file: &Path, emit_json: bool) -> R
 fn bulk_create(cfg: &Config, file: &Path, emit_json: bool) -> Result<()> {
     let raw = std::fs::read_to_string(file)
         .with_context(|| format!("read {}", file.display()))?;
-    let value: Value = serde_json::from_str(&raw)
-        .with_context(|| format!("parse JSON in {}", file.display()))?;
-
-    let body = match value {
-        Value::Array(_) => {
-            let creates: Vec<NewActivity> = serde_json::from_value(value)
-                .context("decode JSON array as [NewActivity]")?;
-            ActivityBulkMutationRequest {
-                creates,
-                updates: vec![],
-                delete_ids: vec![],
-            }
-        }
-        Value::Object(_) => serde_json::from_value(value)
-            .context("decode object as ActivityBulkMutationRequest")?,
-        _ => return Err(anyhow!("expected JSON array or object, got scalar")),
-    };
-
-    if body.creates.is_empty() && body.updates.is_empty() && body.delete_ids.is_empty() {
-        return Err(anyhow!("nothing to do: creates/updates/deleteIds all empty"));
-    }
+    let body = parse_bulk_body(&raw)
+        .with_context(|| format!("parse {}", file.display()))?;
     let client = WfClient::new(cfg)?;
     info!(
         creates = body.creates.len(),
@@ -592,5 +599,60 @@ mod tests {
         let rows = vec![s(&["2026-04-01", "DEPOSIT", "100", "TWD"])];
         let acts = map_csv_to_activities(&headers, &rows, "acct-1").unwrap();
         assert_eq!(acts[0].activity_type, "DEPOSIT");
+    }
+
+    // ── parse_bulk_body ─────────────────────────────────────────────
+
+    #[test]
+    fn bulk_body_accepts_top_level_array() {
+        let raw = r#"[
+            {"accountId":"a","activityType":"DEPOSIT","activityDate":"2026-04-01","currency":"TWD","amount":"100"}
+        ]"#;
+        let body = parse_bulk_body(raw).unwrap();
+        assert_eq!(body.creates.len(), 1);
+        assert_eq!(body.updates.len(), 0);
+        assert_eq!(body.delete_ids.len(), 0);
+        assert_eq!(body.creates[0].activity_type, "DEPOSIT");
+        assert_eq!(body.creates[0].amount.as_deref(), Some("100"));
+    }
+
+    #[test]
+    fn bulk_body_accepts_full_mutation_object() {
+        let raw = r#"{
+            "creates": [
+                {"accountId":"a","activityType":"DEPOSIT","activityDate":"2026-04-01","currency":"TWD"}
+            ],
+            "updates": [],
+            "deleteIds": ["row-x", "row-y"]
+        }"#;
+        let body = parse_bulk_body(raw).unwrap();
+        assert_eq!(body.creates.len(), 1);
+        assert_eq!(body.delete_ids, vec!["row-x", "row-y"]);
+    }
+
+    #[test]
+    fn bulk_body_empty_payload_errors() {
+        let raw = r#"{"creates": [], "updates": [], "deleteIds": []}"#;
+        let err = parse_bulk_body(raw).unwrap_err();
+        assert!(err.to_string().contains("nothing to do"));
+    }
+
+    #[test]
+    fn bulk_body_empty_array_errors() {
+        let raw = "[]";
+        let err = parse_bulk_body(raw).unwrap_err();
+        assert!(err.to_string().contains("nothing to do"));
+    }
+
+    #[test]
+    fn bulk_body_scalar_errors() {
+        let err = parse_bulk_body("42").unwrap_err();
+        assert!(err.to_string().contains("array or object"));
+    }
+
+    #[test]
+    fn bulk_body_invalid_json_errors() {
+        let err = parse_bulk_body("not json").unwrap_err();
+        assert!(err.to_string().contains("invalid JSON"));
     }
 }
